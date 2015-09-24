@@ -7,12 +7,19 @@
 #include <stdexcept>
 #include <vector>
 
+//#define DEBUG
+
 using namespace std;
 using namespace mfem;
 
 const int DIM = 2; // working dimension
 
 const double SAME_POINT_TOLERANCE = 1e-8;
+
+const int SURFACE_ID              = 4;
+const int COARSE_EDGE_ID          = 5;
+const int NEW_LINE_ID             = 7;
+const int BOUNDARY_COARSE_EDGE_ID = 9;
 
 /**
  * Distance between two vertices
@@ -68,15 +75,18 @@ bool vector_has_number(const vector<int>& thevector, int number)
  */
 struct Edge
 {
-  Edge(int beg = -1, int end = -1)
+  Edge(int beg = -1, int end = -1, int id = 1)
     : point_beg(beg)
     , point_end(end)
+    , intermediate_points()
+    , ID(id)
   { }
   
   Edge(const Edge &e)
     : point_beg(e.point_beg)
     , point_end(e.point_end)
     , intermediate_points(e.intermediate_points)
+    , ID(e.ID)
   { }
   
   /**
@@ -135,6 +145,8 @@ struct Edge
   
   /// < indices of intermediate points (intersections)
   vector<int> intermediate_points;
+
+  int ID; ///< Identification number for Physical Line in Gmsh .geo file
 };
 
 /**
@@ -215,7 +227,9 @@ int compute_intersection(const Vertex& beg1, const Vertex& end1,
     const double a1 = (end1(1) - beg1(1)) / (end1(0) - beg1(0));
     const double b1 = beg1(1) - a1 * beg1(0);
 
+#if defined(DEBUG)
     cout << "a1 = " << a1 << " b1 = " << b1 << " a2 = " << a2 << " b2 = " << b2 << " ";
+#endif
 
     if (fabs(a1 - a2) < tol)
     {
@@ -225,10 +239,12 @@ int compute_intersection(const Vertex& beg1, const Vertex& end1,
         return 1; // no intersection - segments are parallel
     }
 
+#if defined(DEBUG)
     cout << "beg1(0) = " << beg1(0) << " beg1(1) = " << beg1(1) << " ";
     cout << "end1(0) = " << end1(0) << " end1(1) = " << end1(1) << " ";
     cout << "beg2(0) = " << beg2(0) << " beg2(1) = " << beg2(1) << " ";
     cout << "end2(0) = " << end2(0) << " end2(1) = " << end2(1) << " ";
+#endif
   
     x_intersect = (b2 - b1) / (a1 - a2);
     if (!in_range(beg1(0), end1(0), x_intersect) ||
@@ -238,7 +254,9 @@ int compute_intersection(const Vertex& beg1, const Vertex& end1,
     
   y_intersect = a2 * x_intersect + b2;
 
+#if defined(DEBUG)
   cout << "x_inter = " << x_intersect << " y_inter = " << y_intersect << endl;
+#endif
 
   if (!in_range(beg1(1), end1(1), y_intersect) ||
       !in_range(beg2(1), end2(1), y_intersect))
@@ -305,6 +323,10 @@ void get_list_of_point_indices_y(const vector<Vertex>& points,
       points_indices.push_back(pi);
 }
 
+/**
+ * Create a list of well-connected lines lying on a left boundary, and insert
+ * their number in the array which is going to be used in Gmsh .geo file.
+ */
 void make_left_boundary_line(ostream& out,
                              const vector<Vertex>& points,
                              double x_min,
@@ -325,6 +347,10 @@ void make_left_boundary_line(ostream& out,
   }
 }
 
+/**
+ * Create a list of well-connected lines lying on a right boundary, and insert
+ * their number in the array which is going to be used in Gmsh .geo file.
+ */
 void make_right_boundary_line(ostream& out,
                               const vector<Vertex>& points,
                               double x_max,
@@ -345,6 +371,10 @@ void make_right_boundary_line(ostream& out,
   }
 }
 
+/**
+ * Create a list of well-connected lines lying on a bottom boundary, and insert
+ * their number in the array which is going to be used in Gmsh .geo file.
+ */
 void make_bottom_boundary_line(ostream& out,
                                const vector<Vertex>& points,
                                double y_min,
@@ -365,6 +395,10 @@ void make_bottom_boundary_line(ostream& out,
   }
 }
 
+/**
+ * Create a list of well-connected lines lying on a top boundary, and insert
+ * their number in the array which is going to be used in Gmsh .geo file.
+ */
 void make_top_boundary_line(ostream& out,
                             const vector<Vertex>& points,
                             double y_max,
@@ -397,7 +431,8 @@ void make_geo_file(ostream &out,
   out << "cl = 10;\n"; // that can be changed manually later on
   
   for (size_t pi = 0; pi < points.size(); ++pi)
-    out << "Point(" << pi+1 << ")={" << points[pi](0) << "," << points[pi](1) << ",0,cl};\n";
+    out << "Point(" << pi+1 << ")={"
+        << points[pi](0) << "," << points[pi](1) << ",0,cl};\n";
 
   int bdr_i1 = find_point_index(points, Vertex(min_coord(0), min_coord(1)));
   int bdr_i2 = find_point_index(points, Vertex(max_coord(0), min_coord(1)));
@@ -411,10 +446,14 @@ void make_geo_file(ostream &out,
   make_top_boundary_line   (out, points, max_coord(1), bdr_i3, bdr_i4, top_points);
   make_left_boundary_line  (out, points, min_coord(0), bdr_i4, bdr_i1, left_points);
 
+
   out << "Line Loop(1)={bottom_boundary[],right_boundary[],top_boundary[],left_boundary[]};\n";
   out << "Plane Surface(1)={1};\n";
-  out << "Physical Surface(1)={1};\n";
+  out << "Physical Surface(" << SURFACE_ID << ")={1};\n";
+  out << "Physical Line(" << BOUNDARY_COARSE_EDGE_ID
+      << ")={bottom_boundary[],right_boundary[],top_boundary[],left_boundary[]};\n";
 
+  int n_coarse_edge = 0, n_new_line = 0;
   for (size_t ei = 0; ei < edges.size(); ++ei)
   {
     const Edge &edge = edges[ei];
@@ -423,11 +462,43 @@ void make_geo_file(ostream &out,
     out << "l=newl; Line(l)={" << edge.point_beg+1 << ",";
     for (size_t ip = 0; ip < edge.intermediate_points.size(); ++ip)
     {
-      out << edge.intermediate_points[ip]+1 << "}; Line{l} In Surface{1};\n";
+      out << edge.intermediate_points[ip]+1 << "}; Line{l} In Surface{1}; ";
+      switch (edge.ID)
+      {
+        case COARSE_EDGE_ID:
+        {
+          out << "coarse_edges[" << n_coarse_edge++ << "]=l;\n";
+          break;
+        }
+        case NEW_LINE_ID:
+        {
+          out << "new_lines[" << n_new_line++ << "]=l;\n";
+          break;
+        }
+        default:
+          throw runtime_error("Unexpected edge ID");
+      }
       out << "l=newl; Line(l)={" << edge.intermediate_points[ip]+1 << ",";
     }
-    out << edge.point_end+1 << "}; Line{l} In Surface{1};\n";
+    out << edge.point_end+1 << "}; Line{l} In Surface{1}; ";
+    switch (edge.ID)
+    {
+      case COARSE_EDGE_ID:
+      {
+        out << "coarse_edges[" << n_coarse_edge++ << "]=l;\n";
+        break;
+      }
+      case NEW_LINE_ID:
+      {
+        out << "new_lines[" << n_new_line++ << "]=l;\n";
+        break;
+      }
+      default:
+        throw runtime_error("Unexpected edge ID");
+    }
   }
+  out << "Physical Line(" << COARSE_EDGE_ID << ")={coarse_edges[]};\n";
+  out << "Physical Line(" << NEW_LINE_ID    << ")={new_lines[]};\n";
 }
 
 /**
@@ -522,12 +593,13 @@ int main(int argc, char *argv[])
    cout << "max_coord = ( " << max_coord(0) << ", " << max_coord(1) << " )\n";
 
    // initial mesh edges - will be extended by the lines from the lines_file
+   cout << "mesh edges: " << mesh.GetNEdges() << "\n";
    vector<Edge> edges(mesh.GetNEdges()); 
    for (int ei = 0; ei < mesh.GetNEdges(); ++ei)
    {
      Array<int> edge_vertices;
      mesh.GetEdgeVertices(ei, edge_vertices);
-     edges[ei] = Edge(edge_vertices[0], edge_vertices[1]);
+     edges[ei] = Edge(edge_vertices[0], edge_vertices[1], COARSE_EDGE_ID);
    }
 
    ifstream inlines(lines_file);
@@ -537,9 +609,12 @@ int main(int argc, char *argv[])
      return 2;
    }
 
+#if defined(DEBUG)
    print_edges(edges);
+#endif
 
    string line;
+   int n_inserted_lines = 0;
    while (getline(inlines, line))
    {
      if (line[0] == '#') continue;
@@ -547,24 +622,43 @@ int main(int argc, char *argv[])
      double x0, y0, x1, y1;
      istringstream istr(line);
      istr >> x0 >> y0 >> x1 >> y1;
+
+     if (x0+SAME_POINT_TOLERANCE < min_coord(0) ||
+         y0+SAME_POINT_TOLERANCE < min_coord(1) ||
+         x1-SAME_POINT_TOLERANCE > max_coord(0) ||
+         y1-SAME_POINT_TOLERANCE > max_coord(1))
+     {
+       cerr << "The edge from the file with lines is out of the mesh domain\n";
+       return 2;
+     }
      
      const int i1 = get_point_index(points, Vertex(x0, y0));
      const int i2 = get_point_index(points, Vertex(x1, y1));
 
-     Edge new_edge(i1, i2);
+     Edge new_edge(i1, i2, NEW_LINE_ID);
      find_intersection_points(edges, points, new_edge);
 
+#if defined(DEBUG)
      print_edges(edges);
+#endif
+
+     ++n_inserted_lines;
    }
 
    inlines.close();
 
+   cout << "inserted lines: " << n_inserted_lines << "\n";
+
+#if defined(DEBUG)
    print_edges(edges);
+#endif
 
    for (size_t ei = 0; ei < edges.size(); ++ei)
      edges[ei].sort_intermediate_points(points);
 
+#if defined(DEBUG)
    print_edges(edges);
+#endif
  
    ofstream out_geo(result_file);
    if (!out_geo)
@@ -574,6 +668,8 @@ int main(int argc, char *argv[])
    }
    make_geo_file(out_geo, min_coord, max_coord, edges, points);
    out_geo.close();
+
+   cout << "file " << result_file << " created successfully\n\n";
 
    return 0;
 }
