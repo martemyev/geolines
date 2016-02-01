@@ -210,7 +210,7 @@ int compute_intersection(const Vertex& beg1, const Vertex& end1,
 {
   const double tol = SAME_POINT_TOLERANCE;
 
-  if (fabs(end2(1) - beg2(1)) < tol)
+  if (fabs(end2(0) - beg2(0)) < tol)
     throw runtime_error("The new line is vertical - not expected");
 
   const double a2 = (end2(1) - beg2(1)) / (end2(0) - beg2(0));
@@ -537,7 +537,7 @@ void print_edges(const vector<Edge> &edges)
 int main(int argc, char *argv[])
 {
    const char *coarsemesh_file = "undefined-file.msh";
-   const char *lines_file      = "undefined-file.msh";
+   const char *lines_file      = "undefined-file.txt";
    const char *result_file     = "result.geo";
 
    OptionsParser args(argc, argv);
