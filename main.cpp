@@ -545,9 +545,9 @@ int main(int argc, char *argv[])
    args.AddOption(&lines_file, "-l", "--lines-file",
                   "File containing descriptions of lines to be inserted");
    args.AddOption(&result_file, "-r", "--result-file",
-                  "File containing resulting geometry");
+                  "File containing resulting geometry (optional: result.geo by default)");
    args.Parse();
-   if (!args.Good())
+   if (argc == 1 || !args.Good())
    {
       args.PrintUsage(cout);
       return 1;
