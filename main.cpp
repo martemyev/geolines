@@ -615,8 +615,10 @@ int main(int argc, char *argv[])
 
    string line;
    int n_inserted_lines = 0;
+   int line_index = 0;
    while (getline(inlines, line))
    {
+     ++line_index;
      if (line[0] == '#') continue;
 
      double x0, y0, x1, y1;
@@ -629,6 +631,8 @@ int main(int argc, char *argv[])
          y1-SAME_POINT_TOLERANCE > max_coord(1))
      {
        cerr << "The edge from the file with lines is out of the mesh domain\n";
+       cerr << "This edge is: (" << x0 << "," << y0 << ") -> (" 
+            << x1 << "," << y1 << ") at line " << line_index << "\n";
        return 2;
      }
      
